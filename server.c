@@ -8,6 +8,9 @@
 
 #include "chat.h"
 
+int num_users;
+int clientfds[MAX_USERS];
+
 void* user_thread(void*);
 
 int main() {
@@ -20,8 +23,8 @@ int main() {
     socklen_t sin_size;
     int bytesrecv;
     char username[MAX_USERNAME_LENGTH];
+    struct user_data data;
     pthread_t user_threads[MAX_USERS];
-    int num_users;
 
 
     // Initialize server
@@ -73,18 +76,25 @@ int main() {
         }
 
         // Get username from client
-        if ((bytesrecv = recv(clientfd, username, sizeof username, 0)) == 0) {
-            fprintf(stderr, "SERVER: recv");
+        if ((bytesrecv = recv(clientfd, username, sizeof username, 0)) == -1) {
+            perror("SERVER: recv");
+            return 1;
+        }
+        else if (bytesrecv == 0) {
+            fprintf(stderr, "Client has disconnected.");
             return 1;
         }
         username[bytesrecv] = 0;
 
         // Create thread for client
-        if ((pthread_create(&user_threads[num_users], NULL, user_thread, &clientfd)) != 0) {
+        strcpy(data.username, username);
+        data.clientfd = clientfd;
+        if ((pthread_create(&user_threads[num_users], NULL, user_thread, &data)) != 0) {
             fprintf(stderr, "SERVER: Failed to create thread\n");
             return 1;
         }
 
+        clientfds[num_users] = clientfd;
         num_users++;
         printf("%s connected.\n", username);
     }
@@ -92,11 +102,14 @@ int main() {
 }
 
 void* user_thread(void* arg) {
-    int clientfd = *((int*)arg);
+    struct user_data data = *(struct user_data*)arg;
     char msg[MAX_MESSAGE_LENGTH];
+    char sendmsg[MAX_MESSAGE_LENGTH + MAX_USERNAME_LENGTH + 2];
     int bytesrecv;
+
     while (1) {
-        if ((bytesrecv = recv(clientfd, msg, sizeof msg, 0)) == -1) {
+        // Receive messages
+        if ((bytesrecv = recv(data.clientfd, msg, sizeof msg, 0)) == -1) {
             perror("SERVER: send");
             break;
         }
@@ -105,8 +118,15 @@ void* user_thread(void* arg) {
             break;
         }
         msg[bytesrecv] = 0;
-        printf("%s\n", msg);
-    }
 
+        // Send messages to all connected clients
+        sprintf(sendmsg, "%s: %s", data.username, msg);
+        printf("%s\n", sendmsg);
+        for (int i = 0; i < num_users; i++) {
+            if (clientfds[i] != data.clientfd && (send(clientfds[i], sendmsg, strlen(sendmsg), 0) == -1)) {
+                perror("SERVER: send");
+            }
+        }
+    }
     return NULL;
 }

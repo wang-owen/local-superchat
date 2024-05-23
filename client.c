@@ -1,16 +1,21 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "chat.h"
+
+void* get_messages(void*);
 
 int main() {
     struct addrinfo hints, * res, * p;
     int sockfd;
     int status;
     char username[MAX_USERNAME_LENGTH];
+    pthread_t thread_id;
     int bytesrecv;
     char msg[MAX_MESSAGE_LENGTH];
 
@@ -49,9 +54,14 @@ int main() {
         perror("CLIENT: send");
     }
 
+    // Create thread to receive messages
+    if ((pthread_create(&thread_id, NULL, get_messages, &sockfd)) != 0) {
+        fprintf(stderr, "SERVER: Failed to create thread\n");
+        return 1;
+    }
+
     while (1) {
         // Send message to server
-        printf("> ");
         fgets(msg, sizeof msg, stdin);
         msg[strlen(msg) - 1] = 0;
         if ((send(sockfd, msg, strlen(msg), 0)) == -1) {
@@ -62,4 +72,23 @@ int main() {
 
     close(sockfd);
     return 0;
+}
+
+void* get_messages(void* arg) {
+    int sockfd = *(int*)arg;
+    int bytesrecv;
+    char msg[MAX_MESSAGE_LENGTH];
+    while (1) {
+        if ((bytesrecv = recv(sockfd, msg, sizeof msg, 0)) == -1) {
+            perror("CLIENT: recv");
+            break;
+        }
+        else if (bytesrecv == 0) {
+            fprintf(stderr, "Server has disconnected.\n");
+            exit(1);
+        }
+        msg[bytesrecv] = 0;
+        printf("%s\n", msg);
+    }
+    return NULL;
 }
