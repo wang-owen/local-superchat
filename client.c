@@ -10,9 +10,62 @@
 
 #include "chat.h"
 
-
 void* get_messages(void*);
-int get_local_ip(char*, char*);
+
+int get_local_ip(char* interface, char* ipstr) {
+    struct ifaddrs* ifaddr, * ifa;
+    char host[NI_MAXHOST];
+
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        return -1;
+    }
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        // Check if the interface name matches
+        if (strcmp(ifa->ifa_name, interface) != 0)
+            continue;
+
+        int family = ifa->ifa_addr->sa_family;
+
+        // Only consider IPv4 and IPv6 addresses
+        if (family == AF_INET || family == AF_INET6) {
+            int s = getnameinfo(ifa->ifa_addr,
+                (family == AF_INET) ? sizeof(struct sockaddr_in) :
+                sizeof(struct sockaddr_in6),
+                host, NI_MAXHOST,
+                NULL, 0, NI_NUMERICHOST);
+            if (s != 0) {
+                printf("getnameinfo() failed: %s\n", gai_strerror(s));
+                continue;
+            }
+
+            strcpy(ipstr, host);
+            freeifaddrs(ifaddr);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+void get_input(char* dest, size_t dest_size) {
+    if (fgets(dest, dest_size, stdin) != NULL) {
+        size_t len = strlen(dest);
+
+        // Check if the input was truncated
+        if (len > 0 && dest[len - 1] == '\n') {
+            dest[len - 1] = '\0';
+        }
+        else {
+            // Input was truncated, clear the rest of the input buffer
+            int c;
+            while ((c = getchar()) != '\n');
+        }
+    }
+}
 
 int main() {
     struct addrinfo hints, * res, * p;
@@ -26,7 +79,7 @@ int main() {
 
     // Get username
     printf("Username (max %d): ", MAX_USERNAME_LENGTH);
-    scanf("%s", username);
+    get_input(username, sizeof username);
 
     // Initalize client
     memset(&hints, 0, sizeof hints);
@@ -63,6 +116,27 @@ int main() {
         perror("CLIENT: send");
     }
 
+    int error;
+    while (1) {
+        if ((bytesrecv = recv(sockfd, &error, sizeof error, 0)) == -1) {
+            perror("CLIENT: recv");
+            return 1;
+        }
+        else if (bytesrecv == 0) {
+            printf("Server has disconnected.\n");
+            return 1;
+        }
+        if (error == -1) {
+            printf("Username invalid. Only letters, numbers, and underscores.\n");
+            return 1;
+        }
+        else if (error == -2) {
+            printf("Username taken.\n");
+            return 1;
+        }
+        break;
+    }
+
     // Create thread to receive messages
     if ((pthread_create(&thread_id, NULL, get_messages, &sockfd)) != 0) {
         fprintf(stderr, "SERVER: Failed to create thread\n");
@@ -71,8 +145,7 @@ int main() {
 
     while (1) {
         // Send message to server
-        fgets(msg, sizeof msg, stdin);
-        msg[strlen(msg) - 1] = 0;
+        get_input(msg, sizeof msg);
         if ((send(sockfd, msg, strlen(msg), 0)) == -1) {
             perror("CLIENT: send");
             break;
@@ -100,43 +173,4 @@ void* get_messages(void* arg) {
         printf("%s\n", msg);
     }
     return NULL;
-}
-
-int get_local_ip(char* interface, char* ipstr) {
-    struct ifaddrs* ifaddr, * ifa;
-    char host[NI_MAXHOST];
-
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        return -1;
-    }
-
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL)
-            continue;
-
-        // Check if the interface name matches
-        if (strcmp(ifa->ifa_name, interface) != 0)
-            continue;
-
-        int family = ifa->ifa_addr->sa_family;
-
-        // Only consider IPv4 and IPv6 addresses
-        if (family == AF_INET || family == AF_INET6) {
-            int s = getnameinfo(ifa->ifa_addr,
-                (family == AF_INET) ? sizeof(struct sockaddr_in) :
-                sizeof(struct sockaddr_in6),
-                host, NI_MAXHOST,
-                NULL, 0, NI_NUMERICHOST);
-            if (s != 0) {
-                printf("getnameinfo() failed: %s\n", gai_strerror(s));
-                continue;
-            }
-
-            strcpy(ipstr, host);
-            break;
-        }
-    }
-    freeifaddrs(ifaddr);
-    return 0;
 }
