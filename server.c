@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <pthread.h> 
+#include <ctype.h>
 
 #include "chat.h"
 
@@ -11,17 +12,21 @@ int num_users;
 int clientfds[MAX_USERS];
 
 void* user_thread(void*);
+void* clean_username(void*);
 
 int main() {
     struct addrinfo hints, * res, * p;
     int status;
     int serverfd;
     int clientfd;
+    int yes = 1;
     char active;
     struct sockaddr_storage clientaddrs;
     socklen_t sin_size;
     int bytesrecv;
+    char accepted;
     char username[MAX_USERNAME_LENGTH];
+    char usernames[MAX_USERS][MAX_USERNAME_LENGTH];
     struct user_data data;
     pthread_t user_threads[MAX_USERS];
 
@@ -40,6 +45,10 @@ int main() {
     for (p = res; p != NULL; p = p->ai_next) {
         if ((serverfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             continue;
+        }
+        if (setsockopt(serverfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+            perror("setsockopt");
+            return 1;
         }
         if ((bind(serverfd, p->ai_addr, p->ai_addrlen)) == -1) {
             close(serverfd);
@@ -62,15 +71,9 @@ int main() {
     active = 1;
     while (active) {
         // Accept client connection
+        accepted = 1;
         if ((clientfd = (accept(serverfd, (struct sockaddr*)&clientaddrs, &sin_size))) == -1) {
             perror("SERVER: accept");
-            break;
-        }
-
-        // Send success message to client
-        char* msg = "Connected to server.";
-        if ((send(clientfd, msg, strlen(msg), 0)) == -1) {
-            perror("SERVER: send");
             break;
         }
 
@@ -85,17 +88,44 @@ int main() {
         }
         username[bytesrecv] = 0;
 
-        // Create thread for client
-        strcpy(data.username, username);
-        data.clientfd = clientfd;
-        if ((pthread_create(&user_threads[num_users], NULL, user_thread, &data)) != 0) {
-            fprintf(stderr, "SERVER: Failed to create thread\n");
-            return 1;
+        // Make sure username is not a duplicate
+        clean_username(username);
+        int err = 0;
+        if (num_users > 0) {
+            for (int i = 0; i < num_users; i++) {
+                if (strcmp(username, usernames[i]) == 0) {
+                    err = -1;
+                    accepted = 0;
+                    break;
+                }
+            }
+        }
+        if ((send(clientfd, &err, sizeof err, 0)) == -1) {
+            perror("SERVER: send");
+            break;
         }
 
-        clientfds[num_users] = clientfd;
-        num_users++;
-        printf("%s connected.\n", username);
+        if (accepted) {
+            strcpy(usernames[num_users], username);
+            // Send success message to client
+            char* msg = "Connected to server.";
+            if ((send(clientfd, msg, strlen(msg), 0)) == -1) {
+                perror("SERVER: send");
+                break;
+            }
+
+            // Create thread for client
+            strcpy(data.username, username);
+            data.clientfd = clientfd;
+            if ((pthread_create(&user_threads[num_users], NULL, user_thread, &data)) != 0) {
+                fprintf(stderr, "SERVER: Failed to create thread\n");
+                return 1;
+            }
+
+            clientfds[num_users] = clientfd;
+            num_users++;
+            printf("%s connected.\n", username);
+        }
     }
     close(serverfd);
 }
@@ -126,6 +156,15 @@ void* user_thread(void* arg) {
                 perror("SERVER: send");
             }
         }
+    }
+    return NULL;
+}
+
+void* clean_username(void* arg) {
+    char* username = (char*)arg;
+    while (*username) {
+        *username = tolower((unsigned char)*username);
+        username++;
     }
     return NULL;
 }

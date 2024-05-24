@@ -63,6 +63,25 @@ int main() {
         perror("CLIENT: send");
     }
 
+    int error;
+    while (1) {
+        if ((bytesrecv = recv(sockfd, &error, sizeof error, 0)) == -1) {
+            perror("CLIENT: recv");
+            return 1;
+        }
+        else if (bytesrecv == 0) {
+            printf("Server has disconnected.\n");
+            exit(1);
+        }
+        if (error == -1) {
+            printf("Username taken.\n");
+            exit(1);
+        }
+        else {
+            break;
+        }
+    }
+
     // Create thread to receive messages
     if ((pthread_create(&thread_id, NULL, get_messages, &sockfd)) != 0) {
         fprintf(stderr, "SERVER: Failed to create thread\n");
@@ -134,9 +153,9 @@ int get_local_ip(char* interface, char* ipstr) {
             }
 
             strcpy(ipstr, host);
-            break;
+            freeifaddrs(ifaddr);
+            return 0;
         }
     }
-    freeifaddrs(ifaddr);
-    return 0;
+    return -1;
 }
