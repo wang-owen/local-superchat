@@ -26,7 +26,8 @@ int main() {
 
     // Get username
     printf("Username (max %d): ", MAX_USERNAME_LENGTH);
-    scanf("%s", username);
+    fgets(username, sizeof username, stdin);
+    username[strlen(username) - 1] = 0;
 
     // Initalize client
     memset(&hints, 0, sizeof hints);
@@ -71,15 +72,17 @@ int main() {
         }
         else if (bytesrecv == 0) {
             printf("Server has disconnected.\n");
-            exit(1);
+            return 1;
         }
         if (error == -1) {
+            printf("Username invalid. Only letters, numbers, and underscores.\n");
+            return 1;
+        }
+        else if (error == -2) {
             printf("Username taken.\n");
-            exit(1);
+            return 1;
         }
-        else {
-            break;
-        }
+        break;
     }
 
     // Create thread to receive messages

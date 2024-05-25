@@ -1,35 +1,37 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <pthread.h> 
 #include <ctype.h>
+#include <semaphore.h>
 
 #include "chat.h"
 
-int num_users;
-int clientfds[MAX_USERS];
+int num_users, max_users = 10;
+int* clientfds;
+sem_t mutex;
 
 void* user_thread(void*);
-void* clean_username(void*);
+int clean_username(char*);
+
+struct user_data {
+    int clientfd;
+    char username[MAX_USERNAME_LENGTH];
+};
 
 int main() {
-    struct addrinfo hints, * res, * p;
-    int status;
-    int serverfd;
-    int clientfd;
-    int yes = 1;
+    int status, serverfd, clientfd, bytesrecv;
     char active;
+    char username[MAX_USERNAME_LENGTH];
+    char** usernames;
+    struct addrinfo hints, * res, * p;
     struct sockaddr_storage clientaddrs;
     socklen_t sin_size;
-    int bytesrecv;
-    char accepted;
-    char username[MAX_USERNAME_LENGTH];
-    char usernames[MAX_USERS][MAX_USERNAME_LENGTH];
     struct user_data data;
-    pthread_t user_threads[MAX_USERS];
-
+    pthread_t tid;
 
     // Initialize server
     memset(&hints, 0, sizeof hints);
@@ -41,11 +43,12 @@ int main() {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
         return 1;
     }
-
     for (p = res; p != NULL; p = p->ai_next) {
         if ((serverfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             continue;
         }
+        // Force on SERVER_PORT
+        int yes = 1;
         if (setsockopt(serverfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
             perror("setsockopt");
             return 1;
@@ -61,17 +64,29 @@ int main() {
         return 1;
     }
 
-    // Begin to accept client connections
-    if ((listen(serverfd, MAX_USERS)) == -1) {
+    // Allocate usernames array
+    usernames = (char**)malloc(max_users * sizeof(char*));
+    for (int i = 0; i < max_users; i++) {
+        usernames[i] = (char*)malloc(MAX_USERNAME_LENGTH * sizeof(char));
+    }
+
+    num_users = 0;
+    active = 1;
+
+    // Allocate clientfds array
+    clientfds = (int*)malloc(max_users * sizeof(int));
+    if (clientfds == NULL) {
+        fprintf(stderr, "SERVER: Memory allocation error\n");
+        return 1;
+    }
+
+    // Listen for client connections
+    if ((listen(serverfd, max_users)) == -1) {
         perror("SERVER: listen");
         return 1;
     }
-    num_users = 0;
-
-    active = 1;
     while (active) {
         // Accept client connection
-        accepted = 1;
         if ((clientfd = (accept(serverfd, (struct sockaddr*)&clientaddrs, &sin_size))) == -1) {
             perror("SERVER: accept");
             break;
@@ -88,14 +103,17 @@ int main() {
         }
         username[bytesrecv] = 0;
 
-        // Make sure username is not a duplicate
-        clean_username(username);
+        // Check username
         int err = 0;
-        if (num_users > 0) {
+        // Check if legal format
+        if (clean_username(username) == -1) {
+            err = -1;
+        }
+        // Check for duplicates
+        else if (num_users > 0) {
             for (int i = 0; i < num_users; i++) {
                 if (strcmp(username, usernames[i]) == 0) {
-                    err = -1;
-                    accepted = 0;
+                    err = -2;
                     break;
                 }
             }
@@ -105,8 +123,9 @@ int main() {
             break;
         }
 
-        if (accepted) {
-            strcpy(usernames[num_users], username);
+        if (err == 0) {
+            strcpy(usernames[num_users], username);  // Save username
+
             // Send success message to client
             char* msg = "Connected to server.";
             if ((send(clientfd, msg, strlen(msg), 0)) == -1) {
@@ -117,7 +136,7 @@ int main() {
             // Create thread for client
             strcpy(data.username, username);
             data.clientfd = clientfd;
-            if ((pthread_create(&user_threads[num_users], NULL, user_thread, &data)) != 0) {
+            if ((pthread_create(&tid, NULL, user_thread, &data)) != 0) {
                 fprintf(stderr, "SERVER: Failed to create thread\n");
                 return 1;
             }
@@ -160,11 +179,18 @@ void* user_thread(void* arg) {
     return NULL;
 }
 
-void* clean_username(void* arg) {
-    char* username = (char*)arg;
+int clean_username(char* username) {
     while (*username) {
-        *username = tolower((unsigned char)*username);
-        username++;
+        if (*username >= 48 && *username <= 57      // 0-9
+            || *username >= 65 && *username <= 90   // A-Z
+            || *username >= 97 && *username <= 122  // a-z
+            || *username == 95) {                   // _
+            *username = tolower((unsigned char)*username);
+            username++;
+        }
+        else {
+            return -1;
+        }
     }
-    return NULL;
+    return 0;
 }
