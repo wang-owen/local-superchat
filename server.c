@@ -124,6 +124,18 @@ int main() {
         }
 
         if (err == 0) {
+            if (num_users + 1 > max_users) {
+                int new_size = max_users + 10;
+                // Resize clientfds
+                clientfds = realloc(clientfds, new_size * sizeof(int));
+
+                // Resize usernames
+                usernames = realloc(usernames, new_size * sizeof(char*));
+                for (int i = num_users; i < new_size; i++) {
+                    usernames[i] = (char*)malloc(MAX_USERNAME_LENGTH * sizeof(char));
+                }
+            }
+
             strcpy(usernames[num_users], username);  // Save username
 
             // Send success message to client
