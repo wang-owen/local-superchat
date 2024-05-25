@@ -12,6 +12,7 @@
 
 int num_users, max_users = 10;
 int* clientfds;
+char** usernames;
 sem_t mutex;
 
 void* user_thread(void*);
@@ -20,13 +21,13 @@ int clean_username(char*);
 struct user_data {
     int clientfd;
     char username[MAX_USERNAME_LENGTH];
+    int user_pos;
 };
 
 int main() {
     int status, serverfd, clientfd, bytesrecv;
     char active;
     char username[MAX_USERNAME_LENGTH];
-    char** usernames;
     struct addrinfo hints, * res, * p;
     struct sockaddr_storage clientaddrs;
     socklen_t sin_size;
@@ -97,10 +98,6 @@ int main() {
             perror("SERVER: recv");
             return 1;
         }
-        else if (bytesrecv == 0) {
-            fprintf(stderr, "Client has disconnected.");
-            return 1;
-        }
         username[bytesrecv] = 0;
 
         // Check username
@@ -148,6 +145,7 @@ int main() {
             // Create thread for client
             strcpy(data.username, username);
             data.clientfd = clientfd;
+            data.user_pos = num_users;
             if ((pthread_create(&tid, NULL, user_thread, &data)) != 0) {
                 fprintf(stderr, "SERVER: Failed to create thread\n");
                 return 1;
@@ -175,6 +173,8 @@ void* user_thread(void* arg) {
         }
         else if (bytesrecv == 0) {
             printf("Client disconnected.\n");
+            // Free up username
+            strcpy(usernames[data.user_pos], "?");
             break;
         }
         msg[bytesrecv] = 0;
