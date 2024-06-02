@@ -1,6 +1,6 @@
-# Chat App
+# Local Superchat
 
-Public chat over local network
+Public chat over local network similar to YouTube Super Chat
 
 ## Usage
 1. Compile and run server.c with chat.h on any machine on local network to act as host
